@@ -27,6 +27,8 @@
 
 #include <cctype>
 #include <algorithm>
+#include <regex>
+// #include <vector>
 
 using namespace std;
 using namespace pugi;
@@ -3200,6 +3202,117 @@ int Tool_musicxml2hum::getFiguredBassDuration(xml_node fnode) {
 // if they are both "C" and "none".
 //
 
+//retrieved from https://www.geeksforgeeks.org/how-to-find-index-of-a-given-element-in-a-vector-in-cpp/
+int getIndex(vector<string> v, string K) {
+    auto it = find(v.begin(), v.end(), K);
+	int index = -1;
+    // If element was found
+    if (it != v.end())
+    {
+        // calculating the index of K
+        int index = it - v.begin();
+
+    }
+	return index;
+}
+
+string getInterval(string bottomNote, string topNote, int bottomAcc = 0, int topAcc = 0){
+	map<string, int> notes = {
+    	{"C", 0}, {"D",1}, {"E",2}, {"F",3},  {"G",4}, {"A",5}, {"B",6}
+	};
+	int bottomInd = notes[bottomNote];
+	int topInd = notes[topNote];
+	int noteInterval = topInd - bottomInd + 1;
+	if (noteInterval < 2){
+		noteInterval += 7;
+	}
+	map<string, int> clockVals{
+		{"C", 0},
+		{"D", 2},
+		{"E", 4},
+		{"F", 5},
+		{"G", 7},
+		{"A", 9},
+		{"B", 11}
+	};
+
+	map<int, int> intervalToClock {
+		{1, 0},
+		{2, 2},
+		{3, 4},
+		{4, 5},
+		{5, 7},
+		{6, 9},
+		{7, 11}
+	};
+
+	int bottomClock = clockVals[bottomNote] + bottomAcc;
+	int topClock = clockVals[topNote] + topAcc;
+	int clockValue = topClock - bottomClock;
+	if (clockValue < 0){
+		clockValue += 12;
+	}
+	int noteToClock = intervalToClock[noteInterval];
+	int diff = clockValue - noteToClock;
+
+	stringstream ss;
+	if (diff > 0) {
+		for (int i=0; i<diff; i++) {
+			ss << "#";
+		}
+	} else if (diff < 0) {
+		for (int i=0; i<-diff; i++) {
+			ss << "b";
+		}
+	}
+	string interval =  ss.str() + std::to_string(noteInterval);
+	return interval;
+
+}
+
+string decipherHarte(vector<int> degrees){
+	map<int, string> altStrings{
+		{0, "*"},
+		{1, "bbbb"},
+		{2, "bbb"},
+		{3, "bb"},
+		{4, "b"},
+		{5, ""},
+		{6, "#"},
+		{7, "##"},
+		{8, "###"},
+		{9, "####"}
+	};
+	stringstream hartess;
+	hartess << "(";
+	for (int i=0; i < degrees.size(); i++){
+		int harteDegree = degrees[i] / 10;
+		int harteAlter = degrees[i] % 10;
+		hartess << altStrings[harteAlter];
+		hartess << std::to_string(harteDegree);
+		if (i < degrees.size()-1){
+			hartess << ",";
+		}
+	}
+	hartess << ")";
+	return hartess.str();
+}
+
+string alterRoot(int rootalter){
+	stringstream ss;
+	ss << "";
+	if (rootalter > 0) {
+		for (int i=0; i<rootalter; i++) {
+			ss << "#";
+		}
+	} else if (rootalter < 0) {
+		for (int i=0; i<-rootalter; i++) {
+			ss << "b";
+		}
+	}
+	return ss.str();
+}
+
 string Tool_musicxml2hum::getHarmonyString(xml_node hnode) {
 	if (!hnode) {
 		return "";
@@ -3214,6 +3327,10 @@ string Tool_musicxml2hum::getHarmonyString(xml_node hnode) {
 	string bass;
 	int rootalter = 0;
 	int bassalter = 0;
+	//Vectors to store altered degree information
+	vector<int> degreeValue;
+	vector<int> degreeAlter;
+	vector<string> degreeType;
 	xml_node grandchild;
 	while (child) {
 		if (nodeType(child, "root")) {
@@ -3243,6 +3360,18 @@ string Tool_musicxml2hum::getHarmonyString(xml_node hnode) {
 				}
 				grandchild = grandchild.next_sibling();
 			}
+		} else if (nodeType(child, "degree")){
+			grandchild = child.first_child();
+			while(grandchild){
+				if (nodeType(grandchild, "degree-value")){
+					degreeValue.push_back(atoi(grandchild.child_value()));
+				} if (nodeType(grandchild, "degree-alter")){
+					degreeAlter.push_back(atoi(grandchild.child_value()));
+				} if (nodeType(grandchild, "degree-type")){
+					degreeType.push_back(grandchild.child_value());
+				}
+				grandchild = grandchild.next_sibling();
+			}
 		}
 		child = child.next_sibling();
 	}
@@ -3253,18 +3382,8 @@ string Tool_musicxml2hum::getHarmonyString(xml_node hnode) {
 		string output = cleanSpaces(ss.str());
 		return output;
 	}
-
-	ss << root;
-
-	if (rootalter > 0) {
-		for (int i=0; i<rootalter; i++) {
-			ss << "#";
-		}
-	} else if (rootalter < 0) {
-		for (int i=0; i<-rootalter; i++) {
-			ss << "-";
-		}
-	}
+	string rootacc = alterRoot(rootalter);
+	ss << root << rootacc;
 
 	if (root.size() && kind.size()) {
 		ss << " ";
@@ -3272,6 +3391,7 @@ string Tool_musicxml2hum::getHarmonyString(xml_node hnode) {
 	ss << kind;
 	if (bass.size()) {
 		ss << "/";
+
 	}
 	ss << bass;
 
@@ -3284,6 +3404,150 @@ string Tool_musicxml2hum::getHarmonyString(xml_node hnode) {
 			ss << "-";
 		}
 	}
+
+	//convert degree-alter integers into sharps and flats
+	map<int, string> alterations{ 
+		{-2, "double-flat "},
+		{-1, "flat "},
+		{0, ""},
+		{1, "sharp "},
+		{2, "double-sharp "}
+	};
+
+	//map between musicxml kindtext and Harte syntax chord abbreviations
+	map<string, string> kindMappingsShort {
+		{"augmented", "aug"},
+		{"augmented-seventh", "aug7"},
+		{"diminished", "dim"},
+		{"diminished-seventh", "dim7"},
+		{"dominant", "7"},
+		{"dominant-11th", "11"},
+		{"dominant-13th", "13"},
+		{"dominant-ninth", "9"},
+		{"French", "fr6"},
+		{"German", "ge6"},
+		{"half-diminished", "hdim7"},
+		{"Italian", "it6"},
+		{"major", "maj"},
+		{"major-11th", "maj11"},
+		{"major-13th", "maj13"},
+		{"major-ninth", "maj9"},
+		{"major-minor", "minmaj7"},
+		{"major-seventh", "maj7"},
+		{"major-sixth", "maj6"},
+		{"minor", "min"},
+		{"minor-11th", "min11"},
+		{"minor-13th", "min13"},
+		{"minor-ninth", "min9"},
+		{"minor-seventh", "min7"},
+		{"minor-sixth", "min6"},
+		{"Neapolitan", "N"},
+		{"none", "none"},
+		{"other", "other"},
+		{"pedal", "ped"},
+		{"power", "pow"},
+		{"suspended-fourth", "sus4"},
+		{"suspended-second", "sus2"},
+		{"Tristan", "tris"}
+
+	};
+
+	//map between musicxml kindtext and long-form Harte syntax
+	map<string, vector<int>> kindMappingsLong{
+		{"augmented", {35, 56}},
+		{"augmented-seventh", {35, 56, 74}},
+		{"diminished", {34, 54}},
+		{"diminished-seventh", {34, 54, 73}},
+		{"dominant", {35, 55, 74}},
+		{"dominant-11th", {35, 55, 74, 95, 115}},
+		{"dominant-13th", {35, 55, 74, 95, 115, 135}},
+		{"dominant-ninth", {35, 55, 74, 95}},
+		{"French", {}},
+		{"German", {}},
+		{"half-diminished", {34, 55, 74}},
+		{"Italian", {}},
+		{"major", {35, 55}},
+		{"major-11th", {35, 55, 75, 95, 115}},
+		{"major-13th", {35, 55, 75, 95, 115 ,135}},
+		{"major-ninth", {35, 55, 75, 95}},
+		{"major-minor", {34, 55, 75}},
+		{"major-seventh", {35, 55, 75}},
+		{"major-sixth", {35, 55, 65}},
+		{"minor", {34, 55}},
+		{"minor-11th", {34, 55, 74, 95, 115}},
+		{"minor-13th", {34, 55, 74, 95, 115, 135}},
+		{"minor-ninth", {34, 55, 74, 95}},
+		{"minor-seventh", {34, 55, 74}},
+		{"minor-sixth", {34, 55, 65}},
+		{"Neapolitan", {}},
+		{"none", {}},
+		{"other", {}},
+		{"pedal", {}},
+		{"power", {55}},
+		{"suspended-fourth", {45, 55}},
+		{"suspended-second", {25, 55}},
+		{"Tristan", {46, 66, 96}}
+	};
+	
+	//Degree information for long Harte notation (i.e. just root and scale degrees, no chord kind)
+	vector<int> harteDegrees = kindMappingsLong[kind];
+	string shortHarteChord = kindMappingsShort[kind];
+	vector<int> shortHarteDegrees = {};
+
+	for (int i = 0; i < degreeValue.size(); i++){
+		ss << " ";
+		//Remove elements of the specified degree
+		if(degreeType[i] == "subtract" || degreeType[i] == "alter"){
+			vector<int>::iterator it = remove_if(harteDegrees.begin(), harteDegrees.end(), [&](int k){
+				return((k/10)==degreeValue[i]);
+			});
+
+			if(degreeType[i] == "subtract"){
+				shortHarteDegrees.push_back(10*degreeValue[i]);
+			}
+		}
+
+		//Add in added or altered degrees
+		if(degreeType[i] == "add" || degreeType[i] == "alter"){
+			int addedDegree = 10*degreeValue[i]+5+degreeAlter[i];
+			harteDegrees.push_back(addedDegree);
+			shortHarteDegrees.push_back(addedDegree);
+		}
+		if(degreeType[i]!="alter"){
+			ss << degreeType[i];
+		}
+		ss << " ";
+		ss << alterations[degreeAlter[i]];
+		ss << degreeValue[i];
+	}
+
+	//Put the notes in the correct order.
+	sort(harteDegrees.begin(), harteDegrees.end());
+	harteDegrees.erase( unique( harteDegrees.begin(), harteDegrees.end() ), harteDegrees.end() );
+
+	sort(shortHarteDegrees.begin(), shortHarteDegrees.end());
+	shortHarteDegrees.erase( unique( shortHarteDegrees.begin(), shortHarteDegrees.end() ), shortHarteDegrees.end() );
+
+	stringstream hartess;
+	hartess << root << rootacc << ":" << decipherHarte(harteDegrees);
+
+	if(bass.size()){
+		hartess << "/" << getInterval(root, bass, rootalter, bassalter);
+	}
+	ss << " " << hartess.str();
+
+	stringstream shortHartess;
+	shortHartess << root << rootacc;
+	if (shortHarteDegrees.size()){
+		shortHartess << ":" << shortHarteChord << decipherHarte(shortHarteDegrees);
+	} else if (shortHarteChord != "maj"){
+		shortHartess << ":" << shortHarteChord;
+	}
+	if(bass.size()){
+		shortHartess << "/" << getInterval(root, bass, rootalter, bassalter);
+	}
+	ss << " " << shortHartess.str();
+
 
 	string output = cleanSpaces(ss.str());
 	return output;
